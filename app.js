@@ -5,10 +5,13 @@
   var D = window.DEMO;
   var LS = 'studie-ux-demo:v1';
   var state = load();
-  var ui = { filter: 'idag', open: {} };
+  var ui = freshUi();
+  var foersteVisning = true;
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /* ---------- lager ---------- */
   function fresh() { return { done: {}, sick: {}, aarsag: {}, theme: null, big: false, dayIdx: null }; }
+  function freshUi() { return { filter: 'idag', open: {}, ugeDag: null, valgte: {}, flerAarsag: null, flerBesked: '' }; }
   function load() {
     var s = fresh();
     try { var raw = JSON.parse(localStorage.getItem(LS) || '{}'); for (var k in raw) s[k] = raw[k]; } catch (e) {}
@@ -21,6 +24,7 @@
   var MDR = ['januar', 'februar', 'marts', 'april', 'maj', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'december'];
   function d(iso) { var p = iso.split('-'); return new Date(+p[0], +p[1] - 1, +p[2], 12); }
   function toMin(t) { var p = t.split(':'); return +p[0] * 60 + +p[1]; }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
   function today() { var i = state.dayIdx == null ? D.startIndex : state.dayIdx; return D.demoDage[i]; }
   function nowMin() { return toMin(D.demoTid); }
   function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -28,14 +32,12 @@
   function kortDato(iso) { var x = d(iso); return DAGE[x.getDay()].slice(0, 3) + ' ' + x.getDate() + '/' + (x.getMonth() + 1); }
   function dagDiff(a, b) { return Math.round((d(b) - d(a)) / 86400000); }
   function absMin(iso, t) { return dagDiff(today(), iso) * 1440 + toMin(t); }
+  function omTid(min) { var h = Math.floor(min / 60), m = min % 60; return (h ? h + ' t ' : '') + m + ' min'; }
   function relTid(iso, t) {
     var diff = absMin(iso, t) - nowMin();
     var dd = dagDiff(today(), iso);
     if (diff < 0) return { tekst: 'Fristen er passeret (' + kortDato(iso) + ' kl. ' + t + ')', over: true };
-    if (dd === 0) {
-      var h = Math.floor(diff / 60), m = diff % 60;
-      return { tekst: 'I dag kl. ' + t + ' (om ' + (h ? h + ' t ' : '') + m + ' min)' };
-    }
+    if (dd === 0) return { tekst: 'I dag kl. ' + t + ' (om ' + omTid(diff) + ')' };
     if (dd === 1) return { tekst: 'I morgen kl. ' + t };
     return { tekst: cap(DAGE[d(iso).getDay()]) + ' ' + d(iso).getDate() + '. ' + MDR[d(iso).getMonth()] + ' kl. ' + t + ' (om ' + dd + ' dage)' };
   }
@@ -44,8 +46,8 @@
   var byId = {};
   D.moduler.forEach(function (m) { byId[m.id] = m; });
   D.tidligereU.forEach(function (m) { m.type = 'lektion'; m.reg = 'U'; m.tidligere = true; byId[m.id] = m; });
-  var lektieAf = {};
-  D.lektier.forEach(function (l) { lektieAf[l.modul] = l; l.m = byId[l.modul]; });
+  var lektieAf = {}, lektieById = {};
+  D.lektier.forEach(function (l) { lektieAf[l.modul] = l; l.m = byId[l.modul]; lektieById[l.id] = l; });
 
   function navn(m) { return m.titel || D.fag[m.fag].navn; }
   function dagensModuler(iso) { return D.moduler.filter(function (m) { return m.dato === iso; }); }
@@ -74,16 +76,32 @@
     kopi: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9h11v11H9zM5 15H4V4h11v1" /></svg>',
     link: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6" /></svg>',
     tjek: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10" /></svg>',
-    dok: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6zM9 11h6M9 15h6" /></svg>',
-    info: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM12 10v7M12 7v.5" /></svg>'
+    pil: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>'
   };
   function regBoks(m) {
-    var r = reg(m);
     if (m.type !== 'lektion') return '';
+    var r = reg(m);
     var t = r === 'til' ? IKON.tjek : r === 'U' ? 'U' : r === 'syg' ? 'S' : '';
     var lbl = r ? REG_TEKST[r] : 'Ikke registreret endnu';
     return '<span class="reg reg-' + (r || 'tom') + '" role="img" aria-label="' + esc(lbl) + '">' + t + '</span>';
   }
+  function regForklaring() {
+    return '<div class="forklaring"><p class="reg-forklaring">' +
+      '<span><span class="reg reg-til">' + IKON.tjek + '</span>Registreret til stede</span>' +
+      '<span><span class="reg reg-ingen"></span>Ikke registreret</span>' +
+      '<span><span class="reg reg-U">U</span>Ugyldigt fravær</span>' +
+      '<span><span class="reg reg-syg">S</span>Sygemeldt (demo)</span></p>' +
+      '<p class="muted lille">Fremmøde-tegnene er et skøn ud fra skærmbilleder af Studie+.</p></div>';
+  }
+  /* Mærker som i Studie+: blå = lektier, grøn = lærernote, gul = ingen note eller lektier. Begge vises, hvis begge findes. */
+  function maerker(m) {
+    var l = lektieAf[m.id], out = '';
+    if (l) out += '<span class="mrk mrk-lektie">Lektier</span>';
+    if (m.note) out += '<span class="mrk mrk-note">Note</span>';
+    if (!out) out = '<span class="mrk mrk-ingen">Ingen</span>';
+    return '<span class="mrker">' + out + '</span>';
+  }
+  function farve(m) { return lektieAf[m.id] ? 'lektie' : m.note ? 'note' : 'ingen'; }
   function aarsagLinje(m) {
     var a = state.aarsag[m.id];
     if (!a) return kanFaaAarsag(m) ? '<span class="bad">Ingen årsag angivet</span>' : '';
@@ -95,6 +113,11 @@
   function knapAarsag(m) {
     if (!kanFaaAarsag(m)) return '';
     return '<button type="button" class="btn" data-action="aarsag" data-id="' + m.id + '">' + (state.aarsag[m.id] ? 'Ret årsag' : 'Angiv årsag') + '</button>';
+  }
+  function lektieKnapper(l, ekstra) {
+    return '<button type="button" class="btn btn-kopi" data-action="kopi-lektie" data-id="' + l.id + '">' + IKON.kopi + '<span class="lbl">Kopiér lektie</span></button>' +
+      (l.link ? '<a class="btn" href="' + esc(l.link) + '" target="_blank" rel="noopener">' + IKON.link + '<span class="lbl">Åbn link</span></a>' +
+        '<button type="button" class="btn" data-action="kopi-link" data-id="' + l.id + '">' + IKON.kopi + '<span class="lbl">Kopiér link</span></button>' : '') + (ekstra || '');
   }
 
   /* ---------- tekster til kopi ---------- */
@@ -126,11 +149,10 @@
       var besked = ok ? 'Kopieret' : 'Kunne ikke kopiere. Markér teksten selv.';
       if (knap) {
         knap.classList.add('is-kopieret');
-        knap.setAttribute('data-kopieret', '1');
         if (lbl) { if (!knap.dataset.orig) knap.dataset.orig = lbl.textContent; lbl.textContent = besked; }
         clearTimeout(knap._t);
         knap._t = setTimeout(function () {
-          knap.classList.remove('is-kopieret'); knap.removeAttribute('data-kopieret');
+          knap.classList.remove('is-kopieret');
           if (lbl) lbl.textContent = knap.dataset.orig;
         }, 2500);
       }
@@ -143,33 +165,31 @@
   function meld(t) { var el = document.getElementById('live'); el.textContent = ''; setTimeout(function () { el.textContent = t; }, 30); }
 
   /* ---------- komponenter ---------- */
-  function lektieItem(l, visDato) {
+  function lektieItem(l) {
     var faerdigt = !!state.done[l.id], aaben = !!ui.open[l.id];
     return '<li class="lektie' + (faerdigt ? ' is-done' : '') + '">' +
-      '<div class="lektie-head"><h3>' + esc(navn(l.m)) + '</h3><span class="muted">' + (visDato ? kortDato(l.m.dato) + ', ' : '') + 'kl. ' + l.m.start + '</span></div>' +
-      '<p class="lektie-kort">' + esc(aaben ? l.tekst : l.kort) + '</p>' +
+      '<div class="lektie-head"><h3>' + esc(navn(l.m)) + '</h3><span class="muted tid">kl. ' + l.m.start + ' · ' + esc(l.m.lokale) + '</span></div>' +
+      '<p class="lektie-tekst">' + esc(aaben ? l.tekst : l.kort) + '</p>' +
       (aaben && l.link ? '<p class="lektie-link"><a href="' + esc(l.link) + '" target="_blank" rel="noopener">' + esc(l.link) + '</a></p>' : '') +
-      '<div class="knapper">' +
-        '<button type="button" class="btn btn-primary" data-action="kopi-lektie" data-id="' + l.id + '">' + IKON.kopi + '<span class="lbl">Kopiér</span></button>' +
-        (l.link ? '<a class="btn" href="' + esc(l.link) + '" target="_blank" rel="noopener">' + IKON.link + '<span class="lbl">Åbn link</span></a>' : '') +
+      '<div class="knapper">' + lektieKnapper(l,
         '<button type="button" class="btn" data-action="done" data-id="' + l.id + '" aria-pressed="' + faerdigt + '">' + (faerdigt ? IKON.tjek : '') + '<span class="lbl">' + (faerdigt ? 'Færdig' : 'Markér færdig') + '</span></button>' +
-        '<button type="button" class="btn btn-text" data-action="fold" data-id="' + l.id + '" aria-expanded="' + aaben + '">' + (aaben ? 'Vis kort' : 'Vis hele lektien') + '</button>' +
+        '<button type="button" class="btn btn-text" data-action="fold" data-id="' + l.id + '" aria-expanded="' + aaben + '">' + (aaben ? 'Vis kort' : 'Vis hele lektien') + '</button>') +
       '</div></li>';
   }
 
-  function skemaRaekke(m) {
+  function skemaRaekke(m, naesteId) {
     var slut = erSlut(m), nu = erNu(m), r = reg(m), l = lektieAf[m.id];
-    var status = nu ? 'Nu' : slut ? 'Slut' : 'Senere';
-    var info = [esc(m.lokale) + ' · ' + esc(m.laerer)];
-    if (l) info.push('Lektie: ' + esc(l.kort));
-    if (m.note) info.push('Note: ' + esc(m.note));
-    return '<li class="raekke' + (nu ? ' is-nu' : '') + (slut ? ' is-slut' : '') + '">' +
-      '<div class="raekke-tid"><strong>' + m.start + '</strong><span class="muted">' + m.slut + '</span></div>' +
+    var status = nu ? 'Nu' : m.id === naesteId ? 'Næste' : slut ? 'Slut' : '';
+    var p = nu ? ((nowMin() - toMin(m.start)) / (toMin(m.slut) - toMin(m.start))).toFixed(3) : '';
+    return '<li class="raekke' + (nu ? ' is-nu' : slut ? ' is-slut' : ' is-senere') + (m.id === naesteId ? ' is-naeste' : '') + '"' + (nu ? ' data-p="' + p + '"' : '') + '>' +
+      '<p class="raekke-tid tid"><strong>' + m.start + '</strong><span>' + m.slut + '</span></p>' +
       '<div class="raekke-main">' +
-        '<p class="raekke-titel">' + regBoks(m) + '<button type="button" class="linkknap" data-action="aaben-modul" data-id="' + m.id + '">' + esc(navn(m)) + '</button> <span class="status">' + status + '</span></p>' +
-        '<p class="muted">' + info.join('<br>') + '</p>' +
-        (r && r !== 'til' ? '<p>' + REG_TEKST[r] + (aarsagLinje(m) ? ' · ' + aarsagLinje(m) : '') + '</p>' : '') +
+        '<p class="raekke-titel">' + regBoks(m) + '<button type="button" class="linkknap" data-action="aaben-modul" data-id="' + m.id + '">' + esc(navn(m)) + '</button>' + (status ? '<span class="status">' + status + '</span>' : '') + '</p>' +
+        '<p class="muted">' + esc(m.lokale) + ' · ' + esc(m.laerer) + '</p>' +
+        (m.note ? '<p class="raekke-note"><span class="mrk mrk-note">Note</span> ' + esc(m.note) + '</p>' : '') +
+        (r && r !== 'til' ? '<p class="raekke-reg">' + REG_TEKST[r] + (aarsagLinje(m) ? ' · ' + aarsagLinje(m) : '') + '</p>' : '') +
       '</div>' +
+      (l ? '<div class="raekke-lektie' + (state.done[l.id] ? ' is-done' : '') + '"><p class="etiket"><span class="mrk mrk-lektie">Lektie</span></p><p class="raekke-lektie-tekst">' + esc(l.kort) + '</p><div class="knapper">' + lektieKnapper(l) + '</div></div>' : '') +
       '<div class="raekke-knap">' + knapKopiModul(m, true) + knapAarsag(m) + '</div>' +
     '</li>';
   }
@@ -205,52 +225,61 @@
     return rows;
   }
   function pct(x) { return x.toFixed(1).replace('.', ',') + ' %'; }
+  function naesteAktivitet() { var t = today(); return D.kalender.filter(function (k) { return k.dato >= t; })[0] || D.kalender[D.kalender.length - 1]; }
 
   /* ---------- skærme ---------- */
   var screens = {};
 
   screens.idag = function () {
-    var t = today(), mods = dagensModuler(t);
+    var t = today(), mods = dagensModuler(t), n = nowMin();
     var nu = mods.filter(erNu)[0];
-    var naeste = mods.filter(function (m) { return toMin(m.start) > nowMin(); })[0];
+    var naeste = mods.filter(function (m) { return toMin(m.start) > n; })[0];
     var lekt = D.lektier.filter(function (l) { return l.m.dato === t; });
     var mangler = manglerListe().filter(function (i) { return !state.done[i.id]; });
-    var syg = state.sick[t];
-    var nd = naesteSkoledag(t);
+    var syg = state.sick[t], nd = naesteSkoledag(t);
 
-    var hero = '<section class="hero">' +
-      '<h1 tabindex="-1">' + langDato(t) + '</h1>' +
-      '<p class="muted">Klokken er ' + D.demoTid + ' (demotid)</p>' +
-      (nu ? '<p class="nu">Nu: <strong>' + esc(navn(nu)) + '</strong> til ' + nu.slut + ', ' + esc(nu.lokale) + '</p>' : '') +
-      (naeste ? '<p class="naeste-lbl">Næste</p><p class="naeste"><strong>' + esc(navn(naeste)) + '</strong></p><p class="naeste-info">' + naeste.start + '-' + naeste.slut + ' · ' + esc(naeste.lokale) + ' · ' + esc(naeste.laerer) + ' · ' + relTid(t, naeste.start).tekst.replace('I dag kl. ' + naeste.start + ' ', '') + '</p>'
-              : '<p class="naeste">Ikke flere moduler i dag.</p>' + (nd ? '<p class="muted">Næste skoledag: ' + langDato(nd) + '</p>' : '')) +
-      '<div class="knapper">' + (syg
-        ? '<p class="syg-status"><strong>Du er sygemeldt i dag (demo).</strong></p><button type="button" class="btn" data-action="raskmeld">Raskmeld</button><button type="button" class="btn" data-action="forlaeng">Forlæng til næste skoledag</button>'
-        : '<button type="button" class="btn btn-syg" data-action="sygemeld">Jeg er syg i dag</button>') + '</div>' +
-      '</section>';
+    var sygHtml = syg
+      ? '<div class="syg-status"><p><strong>Du er sygemeldt i dag (demo).</strong></p><div class="knapper"><button type="button" class="btn" data-action="raskmeld">Raskmeld</button><button type="button" class="btn" data-action="forlaeng">Forlæng til næste skoledag</button></div></div>'
+      : '<button type="button" class="btn btn-syg" data-action="sygemeld">Jeg er syg i dag</button>';
+    var top = '<header class="dag-top"><div><h1 tabindex="-1">' + langDato(t) + '</h1><p class="muted">Klokken er <span class="tid">' + D.demoTid + '</span> (demotid)' +
+      (nu ? ' · nu: ' + esc(navn(nu)) + ' i ' + esc(nu.lokale) + ' til <span class="tid">' + nu.slut + '</span>' : '') + '</p></div><div class="dag-syg knapper"><a class="btn" href="#lektier" data-action="vis-idag">Lektier i dag: <span class="tid">' + lekt.length + '</span></a>' + sygHtml + '</div></header>';
 
-    var skema = '<section class="blok" aria-labelledby="h-skema"><h2 id="h-skema">Dagens skema</h2>' +
-      (mods.length ? '<ol class="raekker">' + mods.map(skemaRaekke).join('') + '</ol>' : '<p>Ingen moduler.</p>') + '</section>';
+    var hero;
+    if (naeste) {
+      var l = lektieAf[naeste.id];
+      hero = '<section class="hoved" aria-labelledby="h-naeste">' +
+        '<p class="etiket" id="h-naeste">Næste modul · om ' + omTid(toMin(naeste.start) - n) + '</p>' +
+        '<p class="kaempe tid">' + naeste.start + '</p>' +
+        '<p class="naeste">' + esc(navn(naeste)) + '</p>' +
+        '<dl class="hoved-fakta"><div><dt>Lokale</dt><dd>' + esc(naeste.lokale) + '</dd></div><div><dt>Slutter</dt><dd class="tid">' + naeste.slut + '</dd></div><div><dt>Lærer</dt><dd>' + esc(naeste.laerer) + '</dd></div></dl>' +
+        (l ? '<div class="hoved-lektie"><p class="etiket"><span class="mrk mrk-lektie">Lektie</span></p><p class="hoved-lektie-tekst">' + esc(l.kort) + '</p><div class="knapper">' + lektieKnapper(l) + '</div></div>'
+           : '<p class="hoved-lektie muted">Ingen lektie til modulet.</p>') +
+        (naeste.note ? '<p class="hoved-note"><span class="mrk mrk-note">Note</span> ' + esc(naeste.note) + '</p>' : '') +
+        '</section>';
+    } else {
+      hero = '<section class="hoved"><p class="etiket">Resten af dagen</p><p class="kaempe">Fri</p><p class="naeste">Ikke flere moduler i dag.</p>' +
+        (nd ? '<p class="hoved-note muted">Næste skoledag: ' + langDato(nd) + '</p>' : '') + '</section>';
+    }
 
-    var lektier = '<section class="blok" aria-labelledby="h-lekt"><div class="blok-head"><h2 id="h-lekt">Lektier til i dag (' + lekt.length + ')</h2>' +
-      (lekt.length ? '<button type="button" class="btn" data-action="kopi-alle" data-scope="idag">' + IKON.kopi + '<span class="lbl">Kopiér alle lektier i dag</span></button>' : '') + '</div>' +
-      (lekt.length ? '<ul class="lektier">' + lekt.map(function (l) { return lektieItem(l, false); }).join('') + '</ul>' : '<p>Ingen lektier i dag.</p>') + '</section>';
+    var linje = '<section class="tidslinje-blok" aria-labelledby="h-skema"><div class="blok-head"><h2 id="h-skema">Dagens moduler og lektier</h2></div>' +
+      (mods.length ? '<ol class="raekker tidslinje">' + mods.map(function (m) { return skemaRaekke(m, naeste && naeste.id); }).join('') +
+        '<li class="nu-mark" aria-hidden="true" hidden><span class="tid">Nu ' + D.demoTid + '</span></li></ol>' : '<p>Ingen moduler.</p>') +
+      regForklaring() + '</section>';
 
-    var forst = mangler[0];
-    var mang = '<section class="blok" aria-labelledby="h-mang"><h2 id="h-mang">Mangler jeg</h2>' +
-      '<p class="stort-tal">' + mangler.length + ' <span>ting mangler</span></p>' +
-      (forst ? '<p>Nærmeste: <strong>' + esc(forst.titel) + '</strong> (' + forst.type.toLowerCase() + '). ' + '<span class="' + (relTid(forst.dato, forst.tid).over ? 'bad' : '') + '">' + relTid(forst.dato, forst.tid).tekst + '</span></p>' : '') +
-      '<p><a class="btn" href="#mangler">Se hele listen</a></p></section>';
+    var forst = mangler[0], frt = forst && relTid(forst.dato, forst.tid);
+    var rest = '<div class="idag-rest">' +
+      '<section class="blok" aria-labelledby="h-lekt"><h2 id="h-lekt">Lektier i dag: <span class="tid">' + lekt.length + '</span></h2>' +
+        (lekt.length ? '<div class="knapper"><a class="btn btn-kopi" href="#lektier" data-action="vis-idag">Se lektier for i dag' + IKON.pil + '</a>' +
+          '<button type="button" class="btn" data-action="kopi-alle" data-scope="idag">' + IKON.kopi + '<span class="lbl">Kopiér alle lektier i dag</span></button></div>' : '<p>Ingen lektier i dag.</p>') + '</section>' +
+      '<section class="blok" aria-labelledby="h-mang"><h2 id="h-mang">Mangler jeg</h2><a class="mangler-tal" href="#mangler"><span class="tal tid">' + mangler.length + '</span><span><strong>ting mangler</strong>' +
+        (forst ? '<br><span class="muted">Nærmeste: ' + esc(forst.titel) + '. </span><span class="' + (frt.over ? 'bad' : 'muted') + '">' + frt.tekst + '</span>' : '') + '</span></a></section>' +
+      '<section class="blok" aria-labelledby="h-smaa"><h2 id="h-smaa">Fra skolen</h2><ul class="links">' +
+        '<li><a href="#samtaler"><span>Samtaler</span><span class="muted">' + D.samtaler.length + ' fiktive beskeder</span></a></li>' +
+        '<li><a href="#kalender"><span>Aktivitetskalender</span><span class="muted">Næste: ' + esc(naesteAktivitet().titel) + '</span></a></li></ul></section>' +
+      '</div>';
 
-    var ulaeste = D.samtaler.length;
-    var smaa = '<section class="blok" aria-labelledby="h-smaa"><h2 id="h-smaa">Fra skolen</h2><ul class="links">' +
-      '<li><a href="#samtaler">Samtaler <span class="muted">(' + ulaeste + ' beskeder, fiktive)</span></a></li>' +
-      '<li><a href="#kalender">Aktivitetskalender <span class="muted">(næste: ' + esc(naesteAktivitet().titel) + ')</span></a></li></ul></section>';
-
-    return hero + '<div class="to-kol"><div>' + skema + '</div><div>' + lektier + mang + smaa + '</div></div>';
+    return '<div class="idag">' + top + hero + rest + linje + '</div>';
   };
-
-  function naesteAktivitet() { var t = today(); return D.kalender.filter(function (k) { return k.dato >= t; })[0] || D.kalender[D.kalender.length - 1]; }
 
   screens.lektier = function () {
     var t = today(), nd = naesteSkoledag(t), f = ui.filter;
@@ -262,13 +291,15 @@
     });
     var filtre = [['idag', 'I dag'], ['imorgen', 'Næste skoledag'], ['uge', 'Denne uge'], ['alle', 'Alle']];
     var grupper = {}; liste.forEach(function (l) { (grupper[l.m.dato] = grupper[l.m.dato] || []).push(l); });
-    return '<h1 tabindex="-1">Lektier</h1>' +
+    return '<header class="side-top"><h1 tabindex="-1">Lektier</h1><p class="muted">Kort tekst først. Kopiér tager hele lektien og lærerens link med.</p></header>' +
       '<div class="filtre" role="group" aria-label="Vis lektier for">' + filtre.map(function (x) {
         return '<button type="button" class="btn" data-action="filter" data-id="' + x[0] + '" aria-pressed="' + (f === x[0]) + '">' + x[1] + '</button>';
       }).join('') + '</div>' +
-      (liste.length ? '<p><button type="button" class="btn btn-primary" data-action="kopi-alle" data-scope="filter">' + IKON.kopi + '<span class="lbl">Kopiér alle ' + liste.length + ' lektier</span></button></p>' : '') +
+      (liste.length ? '<p class="kopi-alle-linje"><button type="button" class="btn btn-primary" data-action="kopi-alle" data-scope="filter">' + IKON.kopi + '<span class="lbl">Kopiér alle ' + liste.length + ' lektier</span></button></p>' : '') +
       (liste.length ? Object.keys(grupper).sort().map(function (dt) {
-        return '<section class="blok"><h2>' + langDato(dt) + (dt === t ? ' (i dag)' : '') + '</h2><ul class="lektier">' + grupper[dt].map(function (l) { return lektieItem(l, false); }).join('') + '</ul></section>';
+        var x = d(dt);
+        return '<section class="lektie-gruppe"><h2 class="gruppe-dato"><span>' + cap(DAGE[x.getDay()]) + (dt === t ? ' (i dag)' : '') + '</span><span class="tid muted">' + x.getDate() + '. ' + MDR[x.getMonth()] + '</span></h2><ul class="lektier">' +
+          grupper[dt].map(lektieItem).join('') + '</ul></section>';
       }).join('') : '<p>Ingen lektier her.</p>');
   };
 
@@ -278,45 +309,56 @@
     var klaret = alle.filter(function (i) { return state.done[i.id]; });
     function item(i) {
       var rt = relTid(i.dato, i.tid), f = !!state.done[i.id];
-      return '<li class="mangel' + (rt.over && !f ? ' is-over' : '') + '">' +
+      return '<li class="mangel' + (rt.over && !f ? ' is-over' : '') + (f ? ' is-done' : '') + '">' +
         '<button type="button" class="btn btn-tjek" data-action="done" data-id="' + i.id + '" aria-pressed="' + f + '" aria-label="' + (f ? 'Fortryd færdig: ' : 'Markér færdig: ') + esc(i.titel) + '">' + (f ? IKON.tjek : '') + '</button>' +
-        '<div><p class="mangel-type muted">' + i.type + '</p><h3>' + esc(i.titel) + '</h3><p class="muted">' + esc(i.under) + '</p>' +
-        '<p class="' + (rt.over && !f ? 'bad' : '') + '">' + rt.tekst + '</p>' +
-        (i.lektie ? '<p><button type="button" class="btn" data-action="kopi-lektie" data-id="' + i.id + '">' + IKON.kopi + '<span class="lbl">Kopiér lektie</span></button></p>' : '') +
-        '</div></li>';
+        '<p class="mangel-frist tid' + (rt.over && !f ? ' bad' : '') + '">' + rt.tekst + '</p>' +
+        '<div class="mangel-krop"><h3>' + esc(i.titel) + '</h3><p class="muted">' + i.type + ' · ' + esc(i.under) + '</p>' +
+          (i.lektie ? '<div class="knapper">' + lektieKnapper(i.lektie) + '</div>' : '') + '</div></li>';
     }
-    return '<h1 tabindex="-1">Mangler jeg</h1>' +
-      '<p class="muted">Lektier og afleveringer, nærmeste frist først. Tryk på firkanten, når du er færdig. Gemmes kun i denne browser.</p>' +
+    return '<header class="side-top"><h1 tabindex="-1">Mangler jeg</h1><p class="muted">' + aabne.length + ' åbne. Nærmeste frist først. Tryk på firkanten, når du er færdig. Gemmes kun i denne browser.</p></header>' +
       (aabne.length ? '<ul class="mangler">' + aabne.map(item).join('') + '</ul>' : '<p>Du mangler ingenting.</p>') +
-      (klaret.length ? '<section class="blok"><h2>Klaret (' + klaret.length + ')</h2><ul class="mangler">' + klaret.map(item).join('') + '</ul></section>' : '');
+      (klaret.length ? '<section class="klaret"><h2>Klaret (' + klaret.length + ')</h2><ul class="mangler">' + klaret.map(item).join('') + '</ul></section>' : '');
   };
 
-  function farve(m) { return lektieAf[m.id] ? 'lektie' : m.type === 'moede' ? 'moede' : m.type === 'andet' ? 'andet' : 'ingen'; }
+  function modulBlok(m) {
+    var a = state.aarsag[m.id], l = lektieAf[m.id];
+    return '<div class="modul f-' + farve(m) + (erSlut(m) ? ' is-slut' : '') + '" style="--s:' + (toMin(m.start) - 480) + ';--d:' + (toMin(m.slut) - toMin(m.start)) + '">' +
+      '<div class="modul-top">' + regBoks(m) + '<span class="modul-tid tid">' + m.start + '–' + m.slut + '</span>' + knapKopiModul(m, true) + '</div>' +
+      '<button type="button" class="linkknap modul-navn" data-action="aaben-modul" data-id="' + m.id + '">' + esc(navn(m)) + '</button>' +
+      '<p class="modul-info">' + esc(m.laerer) + ' · ' + esc(m.lokale) + '</p>' +
+      maerker(m) +
+      (a ? '<p class="modul-aarsag">Årsag: ' + esc(a.aarsag) + '</p>' : kanFaaAarsag(m) ? '<p class="bad modul-aarsag">Mangler årsag</p>' : '') +
+      (l ? '<p class="modul-lektie">' + esc(l.kort) + '</p><div class="knapper"><button type="button" class="btn btn-small btn-kopi" data-action="kopi-lektie" data-id="' + l.id + '">' + IKON.kopi + '<span class="lbl">Kopiér</span></button>' +
+        (l.link ? '<a class="btn btn-small" href="' + esc(l.link) + '" target="_blank" rel="noopener">' + IKON.link + '<span class="lbl">Åbn link</span></a>' : '') + '</div>' : '') +
+      (m.note ? '<p class="modul-note">' + esc(m.note) + '</p>' : '') +
+    '</div>';
+  }
+
   screens.uge = function () {
-    var t = today();
-    var legende = '<details class="legende"><summary>Hvad betyder farver og tegn?</summary><ul>' +
-      '<li><span class="felt f-lektie"></span>Blå: der er lektie</li>' +
-      '<li><span class="felt f-ingen"></span>Gul: ingen lektie</li>' +
-      '<li><span class="felt f-andet"></span>Grøn: projektdag eller andet</li>' +
-      '<li><span class="felt f-moede"></span>Rød: møde</li>' +
-      '<li><span class="ikon">' + IKON.dok + '</span>Lektie &nbsp; <span class="ikon">' + IKON.info + '</span>Note</li>' +
-      '<li><span class="reg reg-til">' + IKON.tjek + '</span>Til stede · <span class="reg reg-U">U</span>Ugyldigt fravær · <span class="reg reg-tom"></span>Ikke registreret · <span class="reg reg-syg">S</span>Sygemeldt (demo)</li>' +
-      '</ul><p class="muted">Tegnene for fremmøde er et skøn ud fra skærmbilleder af Studie+.</p></details>';
+    var t = today(), valgt = ui.ugeDag && D.demoDage.indexOf(ui.ugeDag) > -1 ? ui.ugeDag : t, S = 480;
+    var timer = []; for (var h = 8; h <= 16; h++) timer.push(h);
+    var vaelger = '<div class="dagvaelger" role="group" aria-label="Vælg dag">' + D.demoDage.map(function (dt) {
+      var x = d(dt);
+      return '<button type="button" class="btn dagknap" data-action="vaelg-dag" data-id="' + dt + '" aria-pressed="' + (dt === valgt) + '"><span>' + cap(DAGE[x.getDay()].slice(0, 3)) + '</span><span class="tid">' + x.getDate() + '/' + (x.getMonth() + 1) + (dt === t ? ' i dag' : '') + '</span></button>';
+    }).join('') + '</div>';
+    var akse = '<div class="akse" aria-hidden="true"><div class="akse-hoved"></div><div class="spor">' + timer.map(function (h) {
+      return '<span class="akse-time tid" style="--s:' + (h * 60 - S) + '">' + pad(h) + ':00</span>';
+    }).join('') + '</div></div>';
     var dage = D.demoDage.map(function (dt) {
-      return '<section class="dag' + (dt === t ? ' is-idag' : '') + '"><h2>' + cap(kortDato(dt)) + (dt === t ? ' · i dag' : '') + '</h2>' +
-        dagensModuler(dt).map(function (m) {
-          var a = state.aarsag[m.id];
-          return '<div class="modul f-' + farve(m) + (erSlut(m) ? ' is-slut' : '') + '">' +
-            '<div class="modul-top">' + regBoks(m) + '<span class="modul-tid">' + m.start + '-' + m.slut + '</span>' +
-              '<span class="modul-ikoner">' + (lektieAf[m.id] ? '<span class="ikon" role="img" aria-label="Lektie">' + IKON.dok + '</span>' : '') + (m.note ? '<span class="ikon" role="img" aria-label="Note">' + IKON.info + '</span>' : '') + '</span></div>' +
-            '<button type="button" class="linkknap modul-navn" data-action="aaben-modul" data-id="' + m.id + '">' + esc(navn(m)) + '</button>' +
-            '<p class="muted">' + esc(m.laerer) + ' · ' + esc(m.lokale) + '</p>' +
-            (a ? '<p class="modul-aarsag">Årsag: ' + esc(a.aarsag) + '</p>' : kanFaaAarsag(m) ? '<p class="bad modul-aarsag">Mangler årsag</p>' : '') +
-            '<div class="modul-knapper">' + knapKopiModul(m, true) + '</div>' +
-          '</div>';
-        }).join('') + '</section>';
+      var x = d(dt);
+      return '<section class="dag' + (dt === t ? ' is-idag' : '') + (dt === valgt ? ' is-valgt' : '') + '" aria-label="' + langDato(dt) + '">' +
+        '<h2 class="dag-navn"><span>' + cap(DAGE[x.getDay()]) + '</span><span class="tid">' + x.getDate() + '/' + (x.getMonth() + 1) + '</span>' + (dt === t ? '<span>i dag</span>' : '') + '</h2><div class="spor">' +
+        timer.map(function (h) { return '<span class="time-linje" style="--s:' + (h * 60 - S) + '"></span>'; }).join('') +
+        (dt === t ? '<span class="nu-uge" style="--s:' + (nowMin() - S) + '" aria-hidden="true"></span>' : '') +
+        dagensModuler(dt).map(modulBlok).join('') + '</div></section>';
     }).join('');
-    return '<h1 tabindex="-1">Uge 48</h1><p class="muted">Tryk på et fag for lektie og note. Kopiér-knappen tager hele modulet med.</p>' + legende + '<div class="uge">' + dage + '</div>';
+    var legende = '<details class="legende" open><summary>Hvad betyder farver og tegn?</summary><ul>' +
+      '<li><span class="streg f-lektie"></span><span class="mrk mrk-lektie">Lektier</span> Blå: der er lektie</li>' +
+      '<li><span class="streg f-note"></span><span class="mrk mrk-note">Note</span> Grøn: lærernote</li>' +
+      '<li><span class="streg f-ingen"></span><span class="mrk mrk-ingen">Ingen</span> Gul: ingen note eller lektier</li>' +
+      '<li>Har et modul både lektie og note, vises begge mærker.</li></ul>' + regForklaring() + '</details>';
+    return '<header class="side-top"><h1 tabindex="-1">Uge 48</h1><p class="muted">Lektien står i modulet. Tryk på et fag for hele teksten og noten.</p></header>' +
+      vaelger + '<div class="uge">' + akse + dage + '</div>' + legende;
   };
 
   screens.fravaer = function () {
@@ -328,46 +370,59 @@
     var fravMods = D.tidligereU.concat(D.moduler.filter(function (m) { var r = reg(m); return erSlut(m) && (r === 'U' || r === 'ingen'); }))
       .sort(function (a, b) { return a.dato < b.dato ? 1 : -1; });
     var t = today(), syg = state.sick[t];
+    var nValgt = Object.keys(ui.valgte).filter(function (k) { return ui.valgte[k]; }).length;
 
-    return '<h1 tabindex="-1">Fravær</h1>' +
-      '<p class="demo-note">Demo: alle tal er fiktive. Fravær her = U + sygdom. Om sygdom tæller med: [tjek med skolen].</p>' +
-      '<section class="fravaer-top"><p class="stort-tal">' + pct(totPct) + ' <span>fravær i alt</span></p>' +
-      '<p class="muted">' + (tot.u + tot.syg) + ' af ' + tot.afholdt + ' moduler siden ' + d(D.fravaerStart).getDate() + '. ' + MDR[d(D.fravaerStart).getMonth()] + '. ' + tot.u + ' U, ' + tot.syg + ' syg' + (tot.ingen ? ', ' + tot.ingen + ' ikke registreret' : '') + '.</p>' +
-      (problem.length ? '<p class="advarsel"><strong>Kan blive et problem:</strong> ' + problem.map(function (r) { return esc(D.fag[r.fag].navn) + ' (' + pct(r.pct) + ')'; }).join(', ') + '. Over demo-grænsen på ' + g + ' %.</p>' : '<p>Ingen fag over demo-grænsen.</p>') +
-      '<p class="muted">Demo-grænse: ' + g + ' %. Den rigtige grænse: [tjek med skolen].</p></section>' +
+    return '<div class="fravaer">' +
+      '<header class="side-top"><h1 tabindex="-1">Fravær</h1><p class="demo-note">Demo: alle tal er fiktive. Fravær her = U + sygdom. Om sygdom tæller med: [tjek med skolen].</p></header>' +
+      '<section class="fravaer-tal" aria-labelledby="h-samlet"><p class="stort-tal tid">' + pct(totPct) + '</p><h2 class="stort-tal-lbl" id="h-samlet">Samlet fravær (demo)</h2>' +
+        '<p class="muted">' + (tot.u + tot.syg) + ' af ' + tot.afholdt + ' moduler siden ' + d(D.fravaerStart).getDate() + '. ' + MDR[d(D.fravaerStart).getMonth()] + '. ' + tot.u + ' U, ' + tot.syg + ' syg' + (tot.ingen ? ', ' + tot.ingen + ' ikke registreret' : '') + '.</p>' +
+        (problem.length ? '<p class="advarsel"><strong>Kan blive et problem:</strong> ' + problem.map(function (r) { return esc(D.fag[r.fag].navn) + ' (' + pct(r.pct) + ')'; }).join(', ') + '. Over demo-grænsen på ' + g + ' %.</p>' : '<p>Ingen fag over demo-grænsen.</p>') +
+        '<p class="muted lille">Demo-grænse: ' + g + ' %. Den rigtige grænse: [tjek med skolen].</p></section>' +
 
-      '<section class="blok" aria-labelledby="h-syg"><h2 id="h-syg">Syg?</h2><p class="muted">Demo: der sendes intet til skolen.</p><div class="knapper">' +
-        (syg ? '<p class="syg-status"><strong>Sygemeldt i dag (demo).</strong></p>' : '') +
+      '<section class="fravaer-syg" aria-labelledby="h-syg"><h2 id="h-syg">Syg?</h2><p class="muted">Demo: der sendes intet til skolen.</p>' +
+        (syg ? '<p class="syg-status"><strong>Sygemeldt i dag (demo).</strong></p>' : '') + '<div class="knapper">' +
         '<button type="button" class="btn btn-syg" data-action="sygemeld"' + (syg ? ' disabled' : '') + '>Sygemeld</button>' +
         '<button type="button" class="btn" data-action="raskmeld"' + (syg ? '' : ' disabled') + '>Raskmeld</button>' +
         '<button type="button" class="btn" data-action="forlaeng"' + (syg ? '' : ' disabled') + '>Forlæng sygemelding</button></div></section>' +
 
-      '<section class="blok" aria-labelledby="h-fag"><h2 id="h-fag">Pr. fag</h2><table class="tabel"><thead><tr><th scope="col">Fag</th><th scope="col">Fravær</th><th scope="col">U</th><th scope="col">Syg</th><th scope="col">Moduler</th></tr></thead><tbody>' +
+      '<section class="fravaer-fag" aria-labelledby="h-fag"><h2 id="h-fag">Pr. fag</h2><table class="tabel"><thead><tr><th scope="col">Fag</th><th scope="col">Fravær</th><th scope="col" class="tal">U</th><th scope="col" class="tal">Syg</th><th scope="col" class="tal">Mod.</th></tr></thead><tbody>' +
         rows.map(function (r) {
           var cls = r.pct >= g ? 'bad' : r.pct >= g * 0.75 ? 'warn' : '';
           var tekst = r.pct >= g ? 'Over demo-grænsen' : r.pct >= g * 0.75 ? 'Tæt på' : 'OK';
-          return '<tr><th scope="row">' + esc(D.fag[r.fag].navn) + '</th><td class="' + cls + '"><strong>' + pct(r.pct) + '</strong><br><span>' + tekst + '</span>' +
-            '<span class="bar" aria-hidden="true"><span style="width:' + Math.min(100, r.pct / (g * 1.5) * 100).toFixed(0) + '%"></span></span></td><td>' + r.u + '</td><td>' + r.syg + '</td><td>' + r.afholdt + '</td></tr>';
+          return '<tr><th scope="row">' + esc(D.fag[r.fag].navn) + '</th><td class="pct ' + cls + '"><strong>' + pct(r.pct) + '</strong><br><span>' + tekst + '</span>' +
+            '<span class="bar" aria-hidden="true"><span style="width:' + Math.min(100, r.pct / (g * 1.5) * 100).toFixed(0) + '%"></span></span></td><td class="tal">' + r.u + '</td><td class="tal">' + r.syg + '</td><td class="tal">' + r.afholdt + '</td></tr>';
         }).join('') + '</tbody></table></section>' +
 
-      '<section class="blok" aria-labelledby="h-u"><h2 id="h-u">Moduler med fravær uden årsag eller registrering</h2>' +
-        '<p class="muted">Tryk "Angiv årsag" og vælg. Årsagsliste: demo-eksempel, tjek med skolen. Gemmes kun i denne browser, intet sendes.</p>' +
-        '<ol class="raekker">' + fravMods.map(function (m) {
-          return '<li class="raekke"><div class="raekke-tid"><strong>' + cap(kortDato(m.dato)) + '</strong><span class="muted">' + m.start + '</span></div>' +
+      '<section class="fravaer-liste" aria-labelledby="h-u"><h2 id="h-u">Moduler med fravær uden årsag eller registrering</h2>' + regForklaring() +
+        '<div class="fler-grid"><ol class="raekker">' + fravMods.map(function (m) {
+          return '<li class="raekke fravaer-raekke"><label class="vaelg"><input type="checkbox" class="vaelg-modul" data-id="' + m.id + '"' + (ui.valgte[m.id] ? ' checked' : '') + '><span class="sr-only">Vælg ' + esc(navn(m)) + ' ' + kortDato(m.dato) + '</span></label>' +
+            '<p class="raekke-tid tid"><strong>' + cap(kortDato(m.dato)) + '</strong><span>' + m.start + '</span></p>' +
             '<div class="raekke-main"><p class="raekke-titel">' + regBoks(m) + '<strong>' + esc(navn(m)) + '</strong></p><p>' + REG_TEKST[reg(m)] + '</p><p>' + aarsagLinje(m) + '</p></div>' +
             '<div class="raekke-knap">' + knapKopiModul(m, true) + knapAarsag(m) + '</div></li>';
-        }).join('') + '</ol></section>';
+        }).join('') + '</ol>' +
+        '<div class="fler" role="group" aria-labelledby="h-fler"><h3 id="h-fler">Udfyld valgte moduler</h3>' +
+          '<p class="muted" id="fler-antal">' + nValgt + ' valgt. Sæt flueben ved modulerne og vælg én fælles årsag.</p>' +
+          '<div class="aarsager">' + D.aarsager.map(function (x) {
+            return '<button type="button" class="btn" data-action="fler-aarsag" data-id="' + esc(x) + '" aria-pressed="' + (ui.flerAarsag === x) + '">' + esc(x) + '</button>';
+          }).join('') + '</div>' +
+          '<label class="felt-lbl" for="fler-kommentar">Kort kommentar (valgfri)</label><input id="fler-kommentar" type="text" maxlength="80">' +
+          '<div class="knapper"><button type="button" class="btn btn-primary" data-action="udfyld-valgte">Udfyld valgte moduler</button>' +
+          '<button type="button" class="btn btn-text" data-action="vaelg-alle">Vælg alle uden årsag</button></div>' +
+          '<p class="bad" id="fler-fejl" role="alert"></p>' +
+          (ui.flerBesked ? '<p class="fler-besked ok" role="status">' + esc(ui.flerBesked) + '</p>' : '') +
+          '<p class="muted lille">Årsagsliste: demo-eksempel, tjek med skolen. Gemmes kun i denne browser, intet sendes.</p></div>' +
+        '</div></section></div>';
   };
 
   screens.samtaler = function () {
-    return '<h1 tabindex="-1">Samtaler</h1><p class="muted">Fiktive beskeder til demo.</p><ul class="beskeder">' + D.samtaler.map(function (s) {
+    return '<header class="side-top"><h1 tabindex="-1">Samtaler</h1><p class="muted">Fiktive beskeder til demo.</p></header><ul class="beskeder">' + D.samtaler.map(function (s) {
       return '<li><p class="muted">' + esc(s.fra) + ' · ' + kortDato(s.dato) + '</p><h2>' + esc(s.emne) + '</h2><p>' + esc(s.tekst) + '</p></li>';
-    }).join('') + '</ul><p><a class="btn" href="#idag">Tilbage til I dag</a></p>';
+    }).join('') + '</ul><p class="tilbage"><a class="btn" href="#idag">Tilbage til I dag</a></p>';
   };
   screens.kalender = function () {
-    return '<h1 tabindex="-1">Aktivitetskalender</h1><p class="muted">Fiktive aktiviteter.</p><ol class="raekker">' + D.kalender.map(function (k) {
-      return '<li class="raekke"><div class="raekke-tid"><strong>' + cap(kortDato(k.dato)) + '</strong><span class="muted">' + k.tid + '</span></div><div class="raekke-main"><p class="raekke-titel"><strong>' + esc(k.titel) + '</strong></p><p class="muted">' + esc(k.sted) + '</p></div></li>';
-    }).join('') + '</ol><p><a class="btn" href="#idag">Tilbage til I dag</a></p>';
+    return '<header class="side-top"><h1 tabindex="-1">Aktivitetskalender</h1><p class="muted">Fiktive aktiviteter.</p></header><ol class="raekker">' + D.kalender.map(function (k) {
+      return '<li class="raekke"><p class="raekke-tid tid"><strong>' + cap(kortDato(k.dato)) + '</strong><span>' + k.tid + '</span></p><div class="raekke-main"><p class="raekke-titel"><strong>' + esc(k.titel) + '</strong></p><p class="muted">' + esc(k.sted) + '</p></div></li>';
+    }).join('') + '</ol><p class="tilbage"><a class="btn" href="#idag">Tilbage til I dag</a></p>';
   };
 
   /* ---------- dialoger ---------- */
@@ -378,13 +433,11 @@
   function modulDialog(id) {
     var m = byId[id], l = lektieAf[id], r = reg(m);
     visDialog('<h2 id="dlg-title">' + esc(navn(m)) + '</h2>' +
-      '<p>' + langDato(m.dato) + ', ' + m.start + '-' + m.slut + '<br>Lokale ' + esc(m.lokale) + ' · ' + esc(m.laerer) + '</p>' +
-      (r ? '<p>' + regBoks(m) + REG_TEKST[r] + '</p>' : '') + (aarsagLinje(m) ? '<p>' + aarsagLinje(m) + '</p>' : '') +
-      (l ? '<h3>Lektie</h3><p>' + esc(l.tekst) + '</p>' + (l.link ? '<p class="lektie-link"><a href="' + esc(l.link) + '" target="_blank" rel="noopener">' + esc(l.link) + '</a></p>' : '') : (m.type === 'lektion' ? '<p class="muted">Ingen lektie.</p>' : '')) +
+      '<p>' + langDato(m.dato) + ', ' + m.start + '-' + m.slut + '<br>Lokale ' + esc(m.lokale) + ' · ' + esc(m.laerer) + '</p>' + maerker(m) +
+      (r ? '<p class="raekke-titel">' + regBoks(m) + REG_TEKST[r] + '</p>' : '') + (aarsagLinje(m) ? '<p>' + aarsagLinje(m) + '</p>' : '') +
+      (l ? '<h3>Lektie</h3><p>' + esc(l.tekst) + '</p>' + (l.link ? '<p class="lektie-link"><a href="' + esc(l.link) + '" target="_blank" rel="noopener">' + esc(l.link) + '</a></p>' : '') + '<div class="knapper">' + lektieKnapper(l) + '</div>' : (m.type === 'lektion' ? '<p class="muted">Ingen lektie.</p>' : '')) +
       (m.note ? '<h3>Note</h3><p>' + esc(m.note) + '</p>' : '') +
-      '<div class="knapper">' + knapKopiModul(m, false) +
-        (l ? '<button type="button" class="btn" data-action="kopi-lektie" data-id="' + l.id + '">' + IKON.kopi + '<span class="lbl">Kopiér lektie</span></button>' : '') +
-        knapAarsag(m) + '<button type="button" class="btn btn-text" data-action="luk">Luk</button></div>');
+      '<div class="knapper">' + knapKopiModul(m, false) + knapAarsag(m) + '<button type="button" class="btn btn-text" data-action="luk">Luk</button></div>');
   }
 
   var valg = { id: null, aarsag: null };
@@ -416,6 +469,23 @@
     visDialog('<h2 id="dlg-title">' + tekst + '</h2><p class="demo-note">Demo: der er ikke sendt noget.</p><div class="knapper"><button type="button" class="btn btn-primary" data-action="luk" autofocus>OK</button></div>');
   }
 
+  /* ---------- nu-markøren (signaturbevægelsen) ---------- */
+  function placerNu(anim) {
+    var ol = document.querySelector('.tidslinje'); if (!ol) return;
+    var mk = ol.querySelector('.nu-mark'); if (!mk) return;
+    var row = ol.querySelector('.raekke.is-nu'), nx = ol.querySelector('.raekke.is-senere'), y;
+    if (row) y = row.offsetTop + row.offsetHeight * (+row.dataset.p);
+    else if (nx && ol.querySelector('.raekke.is-slut')) y = nx.offsetTop;
+    else { mk.hidden = true; return; }
+    mk.hidden = false;
+    if (anim && !reduce) {
+      mk.style.transform = 'translateY(0px)';
+      void mk.offsetHeight;
+      mk.classList.add('glid');
+      requestAnimationFrame(function () { mk.style.transform = 'translateY(' + y + 'px)'; });
+    } else { mk.classList.remove('glid'); mk.style.transform = 'translateY(' + y + 'px)'; }
+  }
+
   /* ---------- router og render ---------- */
   function route() { var r = (location.hash || '#idag').slice(1); return screens[r] ? r : 'idag'; }
   function render(fokus) {
@@ -426,24 +496,36 @@
       if (a.getAttribute('data-route') === navR) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
     document.getElementById('skift-dag').innerHTML = 'Dag: ' + kortDato(today());
-    var bt = document.getElementById('btn-tema'), bs = document.getElementById('btn-stor');
-    bt.setAttribute('aria-pressed', document.documentElement.getAttribute('data-theme') === 'dark');
-    bs.setAttribute('aria-pressed', !!state.big);
+    document.getElementById('btn-tema').setAttribute('aria-pressed', document.documentElement.getAttribute('data-theme') === 'dark');
+    document.getElementById('btn-stor').setAttribute('aria-pressed', !!state.big);
     document.title = { idag: 'I dag', lektier: 'Lektier', mangler: 'Mangler jeg', uge: 'Uge', fravaer: 'Fravær', samtaler: 'Samtaler', kalender: 'Aktivitetskalender' }[r] + ' · Studie UX-demo';
+    placerNu(foersteVisning && r === 'idag'); foersteVisning = false;
     if (fokus) { var el = main.querySelector(fokus); if (el) el.focus(); }
   }
   function genRender(knap) {
     var sel = knap && knap.dataset.action ? '[data-action="' + knap.dataset.action + '"][data-id="' + (knap.dataset.id || '') + '"]' : null;
     render(sel);
   }
+  function flerFejl(t) { var el = document.getElementById('fler-fejl'); if (el) el.textContent = t; }
+  function flerAntal() {
+    var n = Object.keys(ui.valgte).filter(function (k) { return ui.valgte[k]; }).length, el = document.getElementById('fler-antal');
+    if (el) el.textContent = n + ' valgt. Sæt flueben ved modulerne og vælg én fælles årsag.';
+  }
 
-  window.addEventListener('hashchange', function () { lukDialog(); render('h1'); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', function () { lukDialog(); ui.flerBesked = ''; render('h1'); window.scrollTo(0, 0); });
+  window.addEventListener('resize', function () { placerNu(false); });
+
+  document.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('vaelg-modul')) return;
+    ui.valgte[e.target.dataset.id] = e.target.checked; flerAntal(); flerFejl('');
+  });
 
   document.addEventListener('click', function (e) {
     var k = e.target.closest('[data-action]'); if (!k || k.disabled) return;
     var a = k.dataset.action, id = k.dataset.id;
     switch (a) {
-      case 'kopi-lektie': kopier(lektieTekst(D.lektier.filter(function (l) { return l.id === id; })[0]), k); break;
+      case 'kopi-lektie': kopier(lektieTekst(lektieById[id]), k); break;
+      case 'kopi-link': kopier(lektieById[id].link, k); break;
       case 'kopi-modul': kopier(modulTekst(byId[id]), k); break;
       case 'kopi-alle': {
         var t = today(), nd = naesteSkoledag(t), f = k.dataset.scope === 'idag' ? 'idag' : ui.filter;
@@ -453,9 +535,11 @@
         var head = f === 'idag' ? 'Lektier ' + langDato(t).toLowerCase() : 'Lektier';
         kopier(head + '\n\n' + ls.map(lektieTekst).join('\n\n'), k); break;
       }
+      case 'vis-idag': ui.filter = 'idag'; break;
       case 'done': state.done[id] = !state.done[id]; if (!state.done[id]) delete state.done[id]; save(); genRender(k); meld(state.done[id] ? 'Markeret som færdig' : 'Markeret som ikke færdig'); break;
       case 'fold': ui.open[id] = !ui.open[id]; genRender(k); break;
       case 'filter': ui.filter = id; genRender(k); break;
+      case 'vaelg-dag': ui.ugeDag = id; genRender(k); break;
       case 'aaben-modul': modulDialog(id); break;
       case 'aarsag': aarsagDialog(id); break;
       case 'vaelg-aarsag':
@@ -466,6 +550,23 @@
         state.aarsag[valg.id] = { aarsag: valg.aarsag, kommentar: document.getElementById('aarsag-kommentar').value.trim() };
         save(); lukDialog(); render(); meld('Årsag gemt: ' + valg.aarsag); break;
       case 'fjern-aarsag': delete state.aarsag[valg.id]; save(); lukDialog(); render(); meld('Årsag fjernet'); break;
+      case 'fler-aarsag':
+        ui.flerAarsag = id; flerFejl('');
+        document.querySelectorAll('[data-action="fler-aarsag"]').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.id === id); });
+        break;
+      case 'vaelg-alle':
+        document.querySelectorAll('.vaelg-modul').forEach(function (c) { if (!state.aarsag[c.dataset.id]) { c.checked = true; ui.valgte[c.dataset.id] = true; } });
+        flerAntal(); flerFejl(''); break;
+      case 'udfyld-valgte': {
+        var ids = Object.keys(ui.valgte).filter(function (x) { return ui.valgte[x]; });
+        if (!ids.length) { flerFejl('Vælg mindst ét modul først (sæt flueben).'); break; }
+        if (!ui.flerAarsag) { flerFejl('Vælg en årsag først.'); break; }
+        var kom = document.getElementById('fler-kommentar').value.trim();
+        ids.forEach(function (x) { state.aarsag[x] = { aarsag: ui.flerAarsag, kommentar: kom }; });
+        save();
+        ui.flerBesked = 'Årsag "' + ui.flerAarsag + '" sat på ' + ids.length + (ids.length === 1 ? ' modul' : ' moduler') + ' (demo, intet sendt).';
+        ui.valgte = {}; ui.flerAarsag = null; render(); meld(ui.flerBesked); break;
+      }
       case 'sygemeld': sygDialog(); break;
       case 'bekraeft-syg': state.sick[today()] = { fra: nowMin() }; save(); render(); kvittering('Du er sygemeldt i dag'); break;
       case 'raskmeld': {
@@ -480,7 +581,7 @@
       case 'luk': lukDialog(); break;
       case 'skift-dag': {
         var i = state.dayIdx == null ? D.startIndex : state.dayIdx;
-        state.dayIdx = (i + 1) % D.demoDage.length; save(); render(); meld('Demodag: ' + langDato(today())); break;
+        state.dayIdx = (i + 1) % D.demoDage.length; ui.ugeDag = null; save(); render(); meld('Demodag: ' + langDato(today())); break;
       }
       case 'visning': {
         var p = document.getElementById('visning'); p.hidden = !p.hidden; k.setAttribute('aria-expanded', !p.hidden); break;
@@ -495,7 +596,7 @@
       case 'nulstil': {
         var th = state.theme;
         try { localStorage.removeItem(LS); } catch (e2) {}
-        state = fresh(); state.theme = th; save(); ui = { filter: 'idag', open: {} };
+        state = fresh(); state.theme = th; save(); ui = freshUi();
         document.documentElement.removeAttribute('data-text');
         render(); meld('Demoen er nulstillet'); break;
       }

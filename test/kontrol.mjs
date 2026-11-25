@@ -80,12 +80,13 @@ const klik = async (sel) => {
   await sleep(200);
   return ev(`return { txt: window.__demoSidsteKopi, lbl: document.querySelector(${JSON.stringify(sel)}).textContent }`);
 };
-r = await klik('[data-action="kopi-lektie"]');
+r = await klik('[data-action="kopi-lektie"][data-id="l3"]'); // forsidens hovedperson har sin egen kopiér-knap først i DOM
 check('Kopiér lektie (tekst + link + "Kopieret")', r.txt.includes('Matematik B') && r.txt.includes('Link: https://example.com/') && r.lbl.includes('Kopieret'), r.lbl);
 r = await klik('[data-action="kopi-alle"][data-scope="idag"]');
 check('Kopiér alle lektier i dag', ['Matematik B', 'Dansk A', 'Informatik C'].every(f => r.txt.includes(f)) && (r.txt.match(/Link:/g) || []).length === 3 && r.lbl.includes('Kopieret'));
 r = [];
-for (const h of ['#idag', '#uge', '#fravaer']) { await ev(H + `await go('${h}'); return 1`); const x = await klik('[data-action="kopi-modul"]'); r.push({ h, txt: x.txt, kop: x.lbl.includes('Kopieret') }); }
+// Uge viser kun den valgte dag på mobil, så knappen findes i den synlige dag.
+for (const [h, sel] of [['#idag', '[data-action="kopi-modul"]'], ['#uge', '.dag.is-valgt [data-action="kopi-modul"]'], ['#fravaer', '[data-action="kopi-modul"]']]) { await ev(H + `await go('${h}'); return 1`); const x = await klik(sel); r.push({ h, txt: x.txt, kop: x.lbl.includes('Kopieret') }); }
 check('Kopiér modul i I dag, Uge og Fravær', r.every(x => x.kop && x.txt.includes('Lokale:') && x.txt.includes('Lærer:')), r.map(x => x.h + ':' + x.txt.split('\n')[0]).join(', '));
 check('Modulkopi har lektie og link', r[0].txt.includes('Lektie: Afsnit 1.2') && r[0].txt.includes('Link: https://example.com/matematik/afsnit-1-2'));
 
@@ -124,6 +125,24 @@ r = await ev(H + `await go('#fravaer'); $('[data-action="aarsag"][data-id="${aid
   return { pre, row, knap, kopi: window.__demoSidsteKopi }`);
 check('Årsag kan ændres og kommer med i modulkopi', r.pre === 'Lægebesøg' && r.row.includes('Årsag: Transport') && r.knap === 'Ret årsag' && r.kopi.includes('Årsag: Transport'), JSON.stringify({ pre: r.pre, knap: r.knap }));
 r = await ev(H + `await go('#idag'); return $$('.raekke').length`);
+
+// 6b. Flervalg: fælles årsag på flere moduler
+r = await ev(H + `await go('#fravaer'); $('[data-action="udfyld-valgte"]').click(); await w(30); const f1=$('#fler-fejl').textContent;
+  const cbs=$$('.vaelg-modul').filter(c=>!c.closest('.raekke').textContent.includes('Årsag:')).slice(0,2); cbs.forEach(c=>c.click()); await w(30);
+  $('[data-action="udfyld-valgte"]').click(); await w(30); const f2=$('#fler-fejl').textContent; const ids=cbs.map(c=>c.dataset.id);
+  $$('[data-action="fler-aarsag"]').find(x=>x.textContent==='Syg').click(); $('#fler-kommentar').value='influenza'; $('[data-action="udfyld-valgte"]').click(); await w(40);
+  const rows=ids.map(id=>$('.vaelg-modul[data-id="'+id+'"]').closest('.raekke').textContent);
+  return { f1, f2, n: ids.length, ok: rows.every(x=>x.includes('Årsag: Syg') && x.includes('influenza')), besked: $('.fler-besked')?.textContent||'' }`);
+check('Flervalg: fejl uden modul/årsag, fælles årsag på 2 moduler', r.f1.includes('modul') && r.f2.includes('årsag') && r.n === 2 && r.ok && r.besked.includes('2 moduler'), JSON.stringify(r));
+
+// 6c. Lektie ved modulet, "Se lektier for i dag", farvemærker (blå = lektier, grøn = note, gul = ingen)
+r = await ev(H + `await go('#idag'); const row=$$('.tidslinje .raekke')[0];
+  const vedModul=!!row.querySelector('.raekke-lektie [data-action="kopi-lektie"]') && !!row.querySelector('[data-action="kopi-link"]') && !!row.querySelector('a[href^="https://example.com/"]');
+  $('[data-action="vis-idag"]').click(); await w(80); const lek={h1:$('h1').textContent, n:$$('.lektie').length, alle:!!$('[data-action="kopi-alle"]')};
+  await go('#uge'); const da=$$('.dag.is-idag .modul').find(m=>m.textContent.includes('Dansk A'));
+  const mk=[...da.querySelectorAll('.mrk')].map(x=>x.textContent); const ingen=$$('.modul .mrk-ingen').length; const ugeLek=!!da.querySelector('.modul-lektie');
+  const leg=$('.legende').textContent; return { vedModul, lek, mk, ingen, ugeLek, leg: leg.includes('Grøn: lærernote') && leg.includes('Blå: der er lektie') && leg.includes('Gul: ingen note eller lektier') }`);
+check('Lektie ved modulet, Se lektier for i dag, mærker Lektier+Note', r.vedModul && r.lek.h1 === 'Lektier' && r.lek.n === 3 && r.lek.alle && r.mk.join() === 'Lektier,Note' && r.ingen > 0 && r.ugeLek && r.leg, JSON.stringify(r));
 
 // 7. Nulstil demo
 r = await ev(H + `$('[data-action="visning"]').click(); $('[data-action="nulstil"]').click(); await w(40); const s=JSON.parse(localStorage.getItem('studie-ux-demo:v1'));
