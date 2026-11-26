@@ -3,56 +3,33 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Studie UX-demo (fiktive data)</title>
+<title>Studie+ demo (fiktive data)</title>
 <meta name="description" content="Klikbar demo af en enklere elevvisning til Studie+. Kun fiktive data.">
-<link rel="stylesheet" href="tokens.css">
-<link rel="stylesheet" href="app.css">
-<script>
-  /* Sæt tema før første tegning, så der ikke blinker lys skærm om aftenen. */
-  (function () {
-    var s = {};
-    try { s = JSON.parse(localStorage.getItem('studie-ux-demo:v1') || '{}'); } catch (e) {}
-    var dark = s.theme ? s.theme === 'dark' : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-    if (s.big) document.documentElement.setAttribute('data-text', 'stor');
-  })();
-</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230a5a9c'/%3E%3Cpath d='M8 3v10M3 8h10' stroke='white' stroke-width='2.5'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css?v=3">
 </head>
 <body>
-<a class="skip" href="#main">Spring til indhold</a>
+<a class="skip" href="#indhold" data-action="spring">Spring til indhold</a>
 
 <header class="top">
-  <div class="top-row">
-    <p class="brand">Studie+ <span class="muted">· demo med fiktive data</span></p>
-    <div class="top-actions">
-      <button type="button" class="btn btn-small" data-action="skift-dag" id="skift-dag" aria-label="Skift dag i demoen">Skift dag</button>
-      <button type="button" class="btn btn-small" data-action="visning" aria-expanded="false" aria-controls="visning">Visning</button>
-    </div>
-  </div>
-  <div class="visning" id="visning" hidden>
-    <button type="button" class="btn" data-action="tema" aria-pressed="false" id="btn-tema">Mørk tilstand</button>
-    <button type="button" class="btn" data-action="stortekst" aria-pressed="false" id="btn-stor">Stor tekst</button>
-    <button type="button" class="btn" data-action="nulstil">Nulstil demo</button>
+  <p class="skole" id="skole"></p>
+  <div class="top-demo">
+    <span>Demo med fiktive data · onsdag 25/11 kl. 13.38</span>
+    <button type="button" data-action="nulstil">Nulstil demo</button>
   </div>
 </header>
 
-<nav class="nav" aria-label="Hovedmenu">
-  <a href="#idag" data-route="idag"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v14H4zM4 10h16M9 3v4M15 3v4" /></svg><span>I dag</span></a>
-  <a href="#lektier" data-route="lektier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6zM9 11h6M9 15h6" /></svg><span>Lektier</span></a>
-  <a href="#mangler" data-route="mangler"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h3M5 12h3M5 18h3M11 6h8M11 12h8M11 18h8" /></svg><span>Mangler</span></a>
-  <a href="#uge" data-route="uge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v15H3zM9 5v15M15 5v15M3 10h18" /></svg><span>Uge</span></a>
-  <a href="#fravaer" data-route="fravaer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM9 12l2 2 4-4" /></svg><span>Fravær</span></a>
-</nav>
+<div class="app">
+  <nav class="menu" aria-label="Hovedmenu"><ul id="menu"></ul></nav>
+  <main id="indhold" tabindex="-1"></main>
+</div>
+<footer class="fod" id="fod" hidden></footer>
 
-<main id="main" tabindex="-1"></main>
+<p class="sr" aria-live="polite" id="live"></p>
+<dialog id="dlg" aria-labelledby="dlg-titel"></dialog>
 
-<p class="sr-only" aria-live="polite" id="live"></p>
-
-<dialog id="dlg" aria-labelledby="dlg-title">
-  <div class="dlg-body" id="dlg-body"></div>
-</dialog>
-
-<script src="data/demo.js"></script>
-<script src="app.js"></script>
+<noscript><p>Demoen kræver JavaScript.</p></noscript>
+<script src="data/demo.js?v=3"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
